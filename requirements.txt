@@ -1,5 +1,4 @@
 Flask
-maher_zubair_baileys
-python-dotenv
+maher-zubair-baileys
 pino
 requests
