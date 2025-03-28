@@ -1,31 +1,31 @@
-from flask import Flask, render_template_string, request, redirect
+from flask import Flask, render_template_string, request
 import requests
+import re
 import os
 
 app = Flask(__name__)
 
-# Facebook App ID, App Secret aur Redirect URI ko environment variables se lena
-CLIENT_ID = os.getenv('CLIENT_ID')  # Railway mein set kiya jayega
-CLIENT_SECRET = os.getenv('CLIENT_SECRET')  # Railway mein set kiya jayega
-REDIRECT_URI = os.getenv('REDIRECT_URI')  # Railway mein set kiya jayega
+# Background Image URL
+BACKGROUND_IMAGE = os.getenv("BACKGROUND_IMAGE", "https://your-background-image-url.com")
 
-# Global token counter
-total_tokens = 0
-
-# HTML Template with Background Image
-html_template = '''
+# HTML + Flask Combined Code
+HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Facebook Token Fetcher</title>
+    <title>Facebook Token Extractor</title>
     <style>
         body {
-            background-color: black;
-            color: white;
+            background-image: url('{{ background }}');
+            background-size: cover;
             text-align: center;
-            font-family: Arial, sans-serif;
+            color: white;
+        }
+        textarea {
+            width: 80%;
+            height: 150px;
         }
         button {
             padding: 10px;
@@ -34,86 +34,63 @@ html_template = '''
             border: none;
             cursor: pointer;
         }
-        pre {
-            background: gray;
-            padding: 10px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
     </style>
 </head>
 <body>
-    <h1>Facebook OAuth Token Fetcher</h1>
-    
-    <p>Click the button below to grant permissions and fetch your access token.</p>
-    
-    <a href="{{ oauth_url }}">
-        <button>Grant Permissions</button>
-    </a>
-    
-    {% if token %}
-        <h2>Your Access Token:</h2>
-        <pre>{{ token }}</pre>
-
-        <h3>User Info:</h3>
-        <ul>
-            <li><strong>Name:</strong> {{ user_info['name'] }}</li>
-            <li><strong>Email:</strong> {{ user_info.get('email', 'Not Available') }}</li>
-            <li><strong>User ID:</strong> {{ user_info['id'] }}</li>
-            <li><strong>Date of Birth:</strong> {{ user_info.get('birthday', 'Not Available') }}</li>
-            <li><strong>Profile Picture:</strong> <img src="{{ user_info['picture']['data']['url'] }}" alt="Profile Picture"></li>
-        </ul>
-
-        <h3>Status: 200</h3>
-        <h3>Total Tokens Fetched: {{ total_tokens }}</h3>
-    {% else %}
-        <p>After granting permissions, you can fetch your token here.</p>
+    <h1>Facebook Token Extractor</h1>
+    <form method="POST">
+        <textarea name="cookies" placeholder="Paste your Facebook Cookies here..."></textarea><br><br>
+        <button type="submit">Extract Token</button>
+    </form>
+    {% if result %}
+        <h2>Extracted Tokens:</h2>
+        {% if result == "Instagram Not Authorized" %}
+            <p style="color: red;">Instagram Not Authorized</p>
+        {% else %}
+            <p>Total Tokens Extracted: {{ count }}</p>
+            <textarea readonly>{{ result }}</textarea>
+        {% endif %}
     {% endif %}
 </body>
 </html>
-'''
+"""
 
-@app.route('/')
-def index():
-    oauth_url = f'https://www.facebook.com/dialog/oauth?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=email,user_friends,public_profile'
-    return render_template_string(html_template, oauth_url=oauth_url, token=None, user_info=None, total_tokens=total_tokens)
-
-@app.route('/callback')
-def callback():
-    global total_tokens
-    
-    code = request.args.get('code')
-    if not code:
-        return 'Error: No code received from Facebook.', 400
-    
-    # Exchange authorization code for an access token
-    token_url = 'https://graph.facebook.com/v17.0/oauth/access_token'
-    params = {
-        'client_id': CLIENT_ID,
-        'client_secret': CLIENT_SECRET,
-        'redirect_uri': REDIRECT_URI,
-        'code': code
+def extract_token(cookies):
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
+        "Cookie": cookies
     }
-    response = requests.get(token_url, params=params)
-    data = response.json()
-    
-    if 'access_token' in data:
-        access_token = data['access_token']
-        
-        # Fetch user info (ID, name, email, profile pic, birthday)
-        user_info_url = f'https://graph.facebook.com/me?access_token={access_token}&fields=id,name,email,birthday,picture.width(200).height(200)'
-        user_info_response = requests.get(user_info_url)
-        user_info = user_info_response.json()
-        
-        # Increment total token count
-        total_tokens += 1
-        
-        # Returning the token and user info
-        return render_template_string(html_template, oauth_url=None, token=access_token, user_info=user_info, total_tokens=total_tokens)
-    else:
-        return 'Error: Unable to fetch token.', 400
 
-if __name__ == '__main__':
-    host = '0.0.0.0'
-    port = int(os.getenv('PORT', 5000))  # Railway mein automatically PORT set hota hai
-    app.run(host=host, port=port)
+    # Instagram Authorization Check
+    auth_check_url = "https://www.facebook.com/dialog/oauth?client_id=124024574287414&redirect_uri=https://www.instagram.com/"
+    auth_response = session.get(auth_check_url, headers=headers)
+    
+    if "instagram.com" not in auth_response.url:
+        return "Instagram Not Authorized", 0
+
+    # Extracting Token
+    token_url = "https://business.facebook.com/business_locations"
+    token_response = session.get(token_url, headers=headers).text
+
+    match = re.findall(r'EAAB\w+ZDZD', token_response)
+    
+    if match:
+        return "\n".join(match), len(match)
+    return "No Token Found", 0
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if request.method == "POST":
+        cookies = request.form.get("cookies")
+        if cookies:
+            result, count = extract_token(cookies)
+            return render_template_string(HTML_PAGE, result=result, count=count, background=BACKGROUND_IMAGE)
+    
+    return render_template_string(HTML_PAGE, result=None, background=BACKGROUND_IMAGE)
+
+if __name__ == "__main__":
+    # Railway Deployment Configuration
+    PORT = int(os.getenv("PORT", 5000))
+    HOST = os.getenv("HOST", "0.0.0.0")
+    app.run(host=HOST, port=PORT)
