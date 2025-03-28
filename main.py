@@ -1,96 +1,165 @@
-from flask import Flask, render_template_string, request
-import requests
-import re
+from flask import Flask, render_template_string, request, jsonify
 import os
+import random
+import asyncio
+from threading import Thread
+from maher_zubair_baileys import Gifted_Tech, useMultiFileAuthState, makeCacheableSignalKeyStore
+import pino
 
+# Setting environment variables directly in the script
+os.environ["PORT"] = "5000"  # You can change this if needed (Railway automatically handles this, but here for reference)
+os.environ["FLASK_ENV"] = "production"  # Set to 'production' for Railway deployment
+
+# Flask app initialization
 app = Flask(__name__)
 
-# Background Image URL
-BACKGROUND_IMAGE = os.getenv("BACKGROUND_IMAGE", "https://your-background-image-url.com")
+# Sessions dictionary to store WhatsApp sessions
+sessions = {}
 
-# HTML + Flask Combined Code
-HTML_PAGE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Facebook Token Extractor</title>
-    <style>
-        body {
-            background-image: url('{{ background }}');
-            background-size: cover;
-            text-align: center;
-            color: white;
-        }
-        textarea {
-            width: 80%;
-            height: 150px;
-        }
-        button {
-            padding: 10px;
-            background: red;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-    </style>
-</head>
-<body>
-    <h1>Facebook Token Extractor</h1>
-    <form method="POST">
-        <textarea name="cookies" placeholder="Paste your Facebook Cookies here..."></textarea><br><br>
-        <button type="submit">Extract Token</button>
-    </form>
-    {% if result %}
-        <h2>Extracted Tokens:</h2>
-        {% if result == "Instagram Not Authorized" %}
-            <p style="color: red;">Instagram Not Authorized</p>
-        {% else %}
-            <p>Total Tokens Extracted: {{ count }}</p>
-            <textarea readonly>{{ result }}</textarea>
-        {% endif %}
-    {% endif %}
-</body>
-</html>
-"""
+# 🔥 Pairing Code Generate करने का फंक्शन 🔥
+async def generate_pair_code(number):
+    session_id = f"session_{random.randint(1000, 9999)}"
+    sessions[number] = session_id
+    state, saveCreds = await useMultiFileAuthState(f'./temp/{session_id}')
 
-def extract_token(cookies):
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
-        "Cookie": cookies
-    }
+    bot = Gifted_Tech({
+        "auth": {
+            "creds": state.creds,
+            "keys": makeCacheableSignalKeyStore(state.keys, pino.Logger(level="fatal"))
+        },
+        "printQRInTerminal": False,
+        "logger": pino.Logger(level="fatal"),
+        "browser": ["Chrome (Linux)", "", ""]
+    })
 
-    # Instagram Authorization Check
-    auth_check_url = "https://www.facebook.com/dialog/oauth?client_id=124024574287414&redirect_uri=https://www.instagram.com/"
-    auth_response = session.get(auth_check_url, headers=headers)
-    
-    if "instagram.com" not in auth_response.url:
-        return "Instagram Not Authorized", 0
+    await asyncio.sleep(2)
+    code = await bot.requestPairingCode(number)
+    return code
 
-    # Extracting Token
-    token_url = "https://business.facebook.com/business_locations"
-    token_response = session.get(token_url, headers=headers).text
-
-    match = re.findall(r'EAAB\w+ZDZD', token_response)
-    
-    if match:
-        return "\n".join(match), len(match)
-    return "No Token Found", 0
-
-@app.route("/", methods=["GET", "POST"])
+# 🔥 WhatsApp Connection का Route 🔥
+@app.route('/')
 def home():
-    if request.method == "POST":
-        cookies = request.form.get("cookies")
-        if cookies:
-            result, count = extract_token(cookies)
-            return render_template_string(HTML_PAGE, result=result, count=count, background=BACKGROUND_IMAGE)
-    
-    return render_template_string(HTML_PAGE, result=None, background=BACKGROUND_IMAGE)
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WhatsApp Bot</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; background: black; color: white; }
+            .container { margin-top: 50px; }
+            input, button { padding: 10px; margin: 5px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>Pair Your WhatsApp</h2>
+            <input type="text" id="number" placeholder="Enter your WhatsApp Number">
+            <button onclick="getCode()">Get Pairing Code</button>
+            <p id="pair_code"></p>
 
+            <h2>Send Message</h2>
+            <input type="text" id="target" placeholder="Enter Target Number / Group ID">
+            <input type="text" id="message" placeholder="Enter Message">
+            <select id="is_group">
+                <option value="false">Send to Number</option>
+                <option value="true">Send to Group</option>
+            </select>
+            <button onclick="sendMessage()">Send</button>
+            <p id="status"></p>
+        </div>
+
+        <script>
+            async function getCode() {
+                let num = document.getElementById("number").value;
+                if (!num) {
+                    document.getElementById("pair_code").innerText = "Enter a valid number";
+                    return;
+                }
+                document.getElementById("pair_code").innerText = "Generating Pairing Code...";
+                let res = await fetch(`/code?number=${num}`);
+                let data = await res.json();
+                document.getElementById("pair_code").innerText = "Pair Code: " + (data.code || "Error");
+            }
+
+            async function sendMessage() {
+                let number = document.getElementById("number").value;
+                let target = document.getElementById("target").value;
+                let message = document.getElementById("message").value;
+                let isGroup = document.getElementById("is_group").value === "true";
+
+                if (!number || !target || !message) {
+                    document.getElementById("status").innerText = "Please fill all fields";
+                    return;
+                }
+
+                document.getElementById("status").innerText = "Sending...";
+                let res = await fetch("/send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ number, target, message, is_group: isGroup })
+                });
+                let data = await res.json();
+                document.getElementById("status").innerText = data.status || "Error";
+            }
+        </script>
+    </body>
+    </html>
+    """)
+
+@app.route('/code', methods=['GET'])
+def get_code():
+    number = request.args.get("number")
+    if not number:
+        return jsonify({"error": "Enter a valid number"}), 400
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    code = loop.run_until_complete(generate_pair_code(number))
+    return jsonify({"code": code})
+
+# 🔥 मैसेज भेजने का फंक्शन 🔥
+async def send_message(session_id, target, message, is_group):
+    state, saveCreds = await useMultiFileAuthState(f'./temp/{session_id}')
+    
+    bot = Gifted_Tech({
+        "auth": {
+            "creds": state.creds,
+            "keys": makeCacheableSignalKeyStore(state.keys, pino.Logger(level="fatal"))
+        },
+        "logger": pino.Logger(level="fatal"),
+        "browser": ["Chrome (Linux)", "", ""]
+    })
+
+    await asyncio.sleep(2)
+
+    if is_group:
+        await bot.sendMessage(target, {"text": message})
+    else:
+        await bot.sendMessage(f"{target}@s.whatsapp.net", {"text": message})
+
+@app.route('/send', methods=['POST'])
+def send():
+    data = request.json
+    number = data.get("number")
+    target = data.get("target")
+    message = data.get("message")
+    is_group = data.get("is_group", False)
+
+    if not number or not target or not message:
+        return jsonify({"error": "Invalid input"}), 400
+
+    session_id = sessions.get(number)
+    if not session_id:
+        return jsonify({"error": "Session not found"}), 400
+
+    thread = Thread(target=lambda: asyncio.run(send_message(session_id, target, message, is_group)))
+    thread.start()
+
+    return jsonify({"status": "Message Sent!"})
+
+# Load environment variables from Railway or .env file (in this case added directly)
 if __name__ == "__main__":
-    # Railway Deployment Configuration
-    PORT = int(os.getenv("PORT", 5000))
-    HOST = os.getenv("HOST", "0.0.0.0")
-    app.run(host=HOST, port=PORT)
+    port = int(os.environ.get("PORT", 5000))  # Railway will provide the port dynamically
+    app.run(host="0.0.0.0", port=port, debug=True)
