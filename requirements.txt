@@ -1,2 +1,5 @@
-Flask 
+Flask
+maher_zubair_baileys
+python-dotenv
+pino
 requests
