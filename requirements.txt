@@ -1,4 +1,2 @@
 Flask
-maher-zubair-baileys
-pino
 requests
