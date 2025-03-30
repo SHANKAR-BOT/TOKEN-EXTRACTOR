@@ -1,3 +1,2 @@
 Flask
-maher_zubair_baileys
 requests
