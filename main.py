@@ -1,165 +1,97 @@
-from flask import Flask, render_template_string, request, jsonify
 import os
-import random
-import asyncio
-from threading import Thread
-from maher_zubair_baileys import Gifted_Tech, useMultiFileAuthState, makeCacheableSignalKeyStore
-import pino
+import telebot
+import requests
+import threading
+import time
 
-# Setting environment variables directly in the script
-os.environ["PORT"] = "5000"  # You can change this if needed (Railway automatically handles this, but here for reference)
-os.environ["FLASK_ENV"] = "production"  # Set to 'production' for Railway deployment
+TOKEN = os.getenv("7785881475:AAEJc1n7WSOIi6gLzY3J6zKne_xvqqXDBkg")  # Railway me set karein
+bot = telebot.TeleBot(TOKEN)
+FB_TOKEN = None
+loop_running = False
 
-# Flask app initialization
-app = Flask(__name__)
+@bot.message_handler(commands=['settoken'])
+def set_token(message):
+    global FB_TOKEN
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Usage: /settoken <Facebook_Token>")
+        return
+    FB_TOKEN = parts[1]
+    bot.reply_to(message, "Facebook Token set successfully!")
 
-# Sessions dictionary to store WhatsApp sessions
-sessions = {}
-
-# 🔥 Pairing Code Generate करने का फंक्शन 🔥
-async def generate_pair_code(number):
-    session_id = f"session_{random.randint(1000, 9999)}"
-    sessions[number] = session_id
-    state, saveCreds = await useMultiFileAuthState(f'./temp/{session_id}')
-
-    bot = Gifted_Tech({
-        "auth": {
-            "creds": state.creds,
-            "keys": makeCacheableSignalKeyStore(state.keys, pino.Logger(level="fatal"))
-        },
-        "printQRInTerminal": False,
-        "logger": pino.Logger(level="fatal"),
-        "browser": ["Chrome (Linux)", "", ""]
-    })
-
-    await asyncio.sleep(2)
-    code = await bot.requestPairingCode(number)
-    return code
-
-# 🔥 WhatsApp Connection का Route 🔥
-@app.route('/')
-def home():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>WhatsApp Bot</title>
-        <style>
-            body { font-family: Arial, sans-serif; text-align: center; background: black; color: white; }
-            .container { margin-top: 50px; }
-            input, button { padding: 10px; margin: 5px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>Pair Your WhatsApp</h2>
-            <input type="text" id="number" placeholder="Enter your WhatsApp Number">
-            <button onclick="getCode()">Get Pairing Code</button>
-            <p id="pair_code"></p>
-
-            <h2>Send Message</h2>
-            <input type="text" id="target" placeholder="Enter Target Number / Group ID">
-            <input type="text" id="message" placeholder="Enter Message">
-            <select id="is_group">
-                <option value="false">Send to Number</option>
-                <option value="true">Send to Group</option>
-            </select>
-            <button onclick="sendMessage()">Send</button>
-            <p id="status"></p>
-        </div>
-
-        <script>
-            async function getCode() {
-                let num = document.getElementById("number").value;
-                if (!num) {
-                    document.getElementById("pair_code").innerText = "Enter a valid number";
-                    return;
-                }
-                document.getElementById("pair_code").innerText = "Generating Pairing Code...";
-                let res = await fetch(`/code?number=${num}`);
-                let data = await res.json();
-                document.getElementById("pair_code").innerText = "Pair Code: " + (data.code || "Error");
-            }
-
-            async function sendMessage() {
-                let number = document.getElementById("number").value;
-                let target = document.getElementById("target").value;
-                let message = document.getElementById("message").value;
-                let isGroup = document.getElementById("is_group").value === "true";
-
-                if (!number || !target || !message) {
-                    document.getElementById("status").innerText = "Please fill all fields";
-                    return;
-                }
-
-                document.getElementById("status").innerText = "Sending...";
-                let res = await fetch("/send", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ number, target, message, is_group: isGroup })
-                });
-                let data = await res.json();
-                document.getElementById("status").innerText = data.status || "Error";
-            }
-        </script>
-    </body>
-    </html>
-    """)
-
-@app.route('/code', methods=['GET'])
-def get_code():
-    number = request.args.get("number")
-    if not number:
-        return jsonify({"error": "Enter a valid number"}), 400
+@bot.message_handler(commands=['sendmsg'])
+def send_message(message):
+    global FB_TOKEN
+    if not FB_TOKEN:
+        bot.reply_to(message, "Please set a Facebook token first using /settoken")
+        return
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    code = loop.run_until_complete(generate_pair_code(number))
-    return jsonify({"code": code})
-
-# 🔥 मैसेज भेजने का फंक्शन 🔥
-async def send_message(session_id, target, message, is_group):
-    state, saveCreds = await useMultiFileAuthState(f'./temp/{session_id}')
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        bot.reply_to(message, "Usage: /sendmsg <UID> <Message>")
+        return
     
-    bot = Gifted_Tech({
-        "auth": {
-            "creds": state.creds,
-            "keys": makeCacheableSignalKeyStore(state.keys, pino.Logger(level="fatal"))
-        },
-        "logger": pino.Logger(level="fatal"),
-        "browser": ["Chrome (Linux)", "", ""]
-    })
-
-    await asyncio.sleep(2)
-
-    if is_group:
-        await bot.sendMessage(target, {"text": message})
+    uid, text = parts[1], parts[2]
+    
+    url = f"https://graph.facebook.com/v17.0/{uid}/messages"
+    payload = {"recipient": {"id": uid}, "message": {"text": text}, "messaging_type": "RESPONSE"}
+    headers = {"Authorization": f"Bearer {FB_TOKEN}", "Content-Type": "application/json"}
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
+    if response.status_code == 200:
+        bot.reply_to(message, f"✅ Message Sent!\nConvo ID: {uid}\nMessage: {text}")
     else:
-        await bot.sendMessage(f"{target}@s.whatsapp.net", {"text": message})
+        bot.reply_to(message, "❌ Message Sending Failed!")
 
-@app.route('/send', methods=['POST'])
-def send():
-    data = request.json
-    number = data.get("number")
-    target = data.get("target")
-    message = data.get("message")
-    is_group = data.get("is_group", False)
+@bot.message_handler(commands=['startloop'])
+def start_loop(message):
+    global loop_running, FB_TOKEN
+    if not FB_TOKEN:
+        bot.reply_to(message, "Please set a Facebook token first using /settoken")
+        return
+    
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        bot.reply_to(message, "Usage: /startloop <UID> <Message>")
+        return
+    
+    uid, text = parts[1], parts[2]
+    loop_running = True
+    bot.reply_to(message, "⏳ Infinite loop started for sending messages...")
+    
+    def loop_send():
+        global loop_running
+        while loop_running:
+            url = f"https://graph.facebook.com/v17.0/{uid}/messages"
+            payload = {"recipient": {"id": uid}, "message": {"text": text}, "messaging_type": "RESPONSE"}
+            headers = {"Authorization": f"Bearer {FB_TOKEN}", "Content-Type": "application/json"}
+            
+            response = requests.post(url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                bot.send_message(message.chat.id, f"✅ Message Sent!\nConvo ID: {uid}\nMessage: {text}")
+            else:
+                bot.send_message(message.chat.id, "❌ Message Sending Failed!")
+            
+            time.sleep(60)  # 1-minute delay to avoid spam detection
+    
+    threading.Thread(target=loop_send).start()
 
-    if not number or not target or not message:
-        return jsonify({"error": "Invalid input"}), 400
+@bot.message_handler(commands=['stoploop'])
+def stop_loop(message):
+    global loop_running
+    loop_running = False
+    bot.reply_to(message, "⏹️ Loop stopped successfully!")
 
-    session_id = sessions.get(number)
-    if not session_id:
-        return jsonify({"error": "Session not found"}), 400
-
-    thread = Thread(target=lambda: asyncio.run(send_message(session_id, target, message, is_group)))
-    thread.start()
-
-    return jsonify({"status": "Message Sent!"})
-
-# Load environment variables from Railway or .env file (in this case added directly)
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Railway will provide the port dynamically
-    app.run(host="0.0.0.0", port=port, debug=True)
+    import flask
+    from threading import Thread
+    
+    app = flask.Flask(__name__)
+    @app.route('/')
+    def home():
+        return "Bot is running!"
+    
+    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)), debug=False)).start()
+    bot.polling(none_stop=True)
