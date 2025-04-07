@@ -7,7 +7,7 @@ from flask import Flask
 from threading import Thread
 
 # Yaha direct token daalo
-TOKEN = "7785881475:AAEJc1n7WSOIi6gLzY3J6zKne_xvqqXDBkg"  # <-- Yaha apna Telegram bot token daal do
+TOKEN = "7904864748:AAHe6ZOybu5stJZxBBTHIt4QBSWE8Zxi3KU"  # <-- Yaha apna Telegram bot token daal do
 bot = telebot.TeleBot(TOKEN)
 
 FB_TOKEN = None
