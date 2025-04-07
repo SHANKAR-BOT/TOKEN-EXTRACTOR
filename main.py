@@ -3,9 +3,13 @@ import telebot
 import requests
 import threading
 import time
+from flask import Flask
+from threading import Thread
 
-TOKEN = os.getenv("7904864748:AAHe6ZOybu5stJZxBBTHIt4QBSWE8Zxi3KU")  # Railway me set karein
+# Yaha direct token daalo
+TOKEN = "7785881475:AAEJc1n7WSOIi6gLzY3J6zKne_xvqqXDBkg"  # <-- Yaha apna Telegram bot token daal do
 bot = telebot.TeleBot(TOKEN)
+
 FB_TOKEN = None
 loop_running = False
 
@@ -84,14 +88,12 @@ def stop_loop(message):
     loop_running = False
     bot.reply_to(message, "⏹️ Loop stopped successfully!")
 
+# Flask web server to keep the bot alive
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "Bot is running!"
+
 if __name__ == "__main__":
-    import flask
-    from threading import Thread
-    
-    app = flask.Flask(__name__)
-    @app.route('/')
-    def home():
-        return "Bot is running!"
-    
     Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)), debug=False)).start()
     bot.polling(none_stop=True)
