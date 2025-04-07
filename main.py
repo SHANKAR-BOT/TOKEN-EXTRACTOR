@@ -4,7 +4,7 @@ import requests
 import threading
 import time
 
-TOKEN = os.getenv("7785881475:AAEJc1n7WSOIi6gLzY3J6zKne_xvqqXDBkg")  # Railway me set karein
+TOKEN = os.getenv("7904864748:AAHe6ZOybu5stJZxBBTHIt4QBSWE8Zxi3KU")  # Railway me set karein
 bot = telebot.TeleBot(TOKEN)
 FB_TOKEN = None
 loop_running = False
